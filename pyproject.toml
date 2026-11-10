@@ -1,0 +1,12 @@
+[project]
+name = "vllm-toys"
+version = "0.1.0"
+description = "CLI tools for a local OpenAI-compatible Qwen server"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=2,<3",
+]
+
+[tool.uv]
+package = false

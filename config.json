@@ -1,0 +1,6 @@
+{
+  "base_url": "http://172.25.0.35:8000/v1",
+  "model": "qwen-robot",
+  "max_tokens": 128,
+  "timeout": 120
+}
