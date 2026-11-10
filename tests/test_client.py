@@ -185,6 +185,16 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(payload["model"], "other-model")
         self.assertEqual(self.server.auth_headers[-1], "Bearer test-key")
 
+    def test_empty_auth_settings(self):
+        config = dict(self.config, api_key="", api_key_env="", stream_include_usage=True)
+        self.config_path.write_text(json.dumps(config), encoding="utf-8")
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "unrelated-key"}):
+            with ChatClient.from_config(self.config_path) as client:
+                message, _ = client.complete([])
+        self.assertEqual(message["content"], "你好")
+        self.assertEqual(self.server.auth_headers[-1], "Bearer not-needed")
+        self.assertEqual(json.loads(self.config_path.read_text(encoding="utf-8")), config)
+
     def test_environment_key_takes_precedence(self):
         config = dict(self.config, api_key="unused", api_key_env="TEST_CHAT_KEY")
         with patch.dict(os.environ, {"TEST_CHAT_KEY": "env-key"}):

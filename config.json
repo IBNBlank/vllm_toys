@@ -1,6 +1,9 @@
 {
   "base_url": "http://172.25.0.35:8000/v1",
   "model": "qwen-robot",
-  "max_tokens": 128,
-  "timeout": 120
+  "api_key": "",
+  "api_key_env": "",
+  "max_tokens": 4096,
+  "timeout": 300,
+  "stream_include_usage": true
 }

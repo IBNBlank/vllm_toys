@@ -86,7 +86,7 @@ with ChatClient.from_config("config.json") as client:
 
 ## 配置与服务切换
 
-当前根目录配置仍指向局域网 Qwen，无需改动即可使用。
+当前根目录配置仍指向局域网 Qwen，无需改动即可使用。配置文件始终保留全部配置项，不需要的认证项填写空字符串 `""`。
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -94,8 +94,8 @@ with ChatClient.from_config("config.json") as client:
 | `model` | 必填 | 服务端识别的模型名 |
 | `max_tokens` | `128` | 单次生成 token 上限 |
 | `timeout` | `120` | 网络等待超时，单位秒 |
-| `api_key` | `not-needed` 占位值 | 直接配置认证密钥；不需要认证的服务可省略 |
-| `api_key_env` | 未设置 | 从指定环境变量读取密钥；设置后优先于 `api_key`，变量缺失或为空则报错 |
+| `api_key` | `""` | 直接配置认证密钥；不需要时留空，客户端使用 `not-needed` 占位值 |
+| `api_key_env` | `""` | 从指定环境变量读取密钥；不需要时留空，非空时优先于 `api_key`，变量缺失或为空则报错 |
 | `stream_include_usage` | `true` | 是否向流式请求加入 `stream_options.include_usage`；中转站不支持时可设为 `false` |
 
 例如，新建 `config.deepseek.json`：
@@ -104,6 +104,7 @@ with ChatClient.from_config("config.json") as client:
 {
   "base_url": "https://api.deepseek.com",
   "model": "deepseek-chat",
+  "api_key": "",
   "api_key_env": "DEEPSEEK_API_KEY",
   "max_tokens": 1024,
   "timeout": 120,

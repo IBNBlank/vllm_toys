@@ -19,8 +19,8 @@ def validate_config(config):
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
         raise ValueError("timeout 必须是正数")
     for key in ("api_key", "api_key_env"):
-        if key in config and (not isinstance(config[key], str) or not config[key].strip()):
-            raise ValueError(f"{key} 必须是非空字符串")
+        if key in config and not isinstance(config[key], str):
+            raise ValueError(f"{key} 必须是字符串，不使用时留空")
     if type(config.get("stream_include_usage", True)) is not bool:
         raise ValueError("stream_include_usage 必须是布尔值")
     return dict(config)

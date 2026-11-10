@@ -71,14 +71,17 @@ uv 根据 `uv.lock` 创建或同步 `.venv`。后续使用 `uv run` 执行，无
 {
   "base_url": "http://172.25.0.35:8000/v1",
   "model": "qwen-robot",
-  "max_tokens": 128,
-  "timeout": 120
+  "api_key": "",
+  "api_key_env": "",
+  "max_tokens": 4096,
+  "timeout": 300,
+  "stream_include_usage": true
 }
 ```
 
 `base_url` 填写 API 根地址，SDK 会追加 `/chat/completions`。`max_tokens` 控制每次生成的 token 上限，`timeout` 为网络等待超时秒数。
 
-需要认证时，可增加 `"api_key_env": "OPENAI_API_KEY"` 并设置对应环境变量，或通过 `api_key` 直接配置密钥。`api_key_env` 优先，变量缺失或为空时会报错。中转站不支持流式用量参数时，可设置 `"stream_include_usage": false`。
+`config.json` 始终保留全部配置项，不需要的认证项填写空字符串 `""`。需要认证时，填写 `"api_key_env": "OPENAI_API_KEY"` 并设置对应环境变量，或通过 `api_key` 直接配置密钥。`api_key_env` 非空时优先，变量缺失或为空时会报错。中转站不支持流式用量参数时，可设置 `"stream_include_usage": false`。
 
 ### 连续对话
 
