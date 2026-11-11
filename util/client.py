@@ -8,6 +8,22 @@ from openai import OpenAI
 from .config import load_config, validate_config
 
 
+def reasoning_text(delta):
+    """Normalize reasoning fields used by OpenAI-compatible services."""
+    for field in ("reasoning_content", "reasoning", "thinking"):
+        value = getattr(delta, field, None)
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, list):
+            text = "".join(
+                part.get("text") or part.get("thinking") or ""
+                for part in value if isinstance(part, dict)
+            )
+            if text:
+                return text
+    return ""
+
+
 class ChatClient:
     """Own one SDK connection pool; callers own conversation history and output."""
 
@@ -43,7 +59,7 @@ class ChatClient:
         """Release HTTP connections. Prefer using the client as a context manager."""
         self._sdk.close()
 
-    def complete(self, messages, stream=False, on_text=None):
+    def complete(self, messages, stream=False, on_text=None, tools=None, on_reasoning=None):
         """Return (assistant message, stats), optionally sending chunks to a callback."""
         params = {
             "model": self.model,
@@ -51,6 +67,9 @@ class ChatClient:
             "max_tokens": self.max_tokens,
             "stream": stream,
         }
+        if tools:
+            params["tools"] = tools
+            params["tool_choice"] = "auto"
         if stream and self.stream_include_usage:
             params["stream_options"] = {"include_usage": True}
         first_text = usage = finish_reason = None
@@ -58,6 +77,7 @@ class ChatClient:
         response = self._sdk.chat.completions.create(**params)
         if stream:
             parts, reasoning_parts = [], []
+            tool_calls = {}
             with response:
                 for chunk in response:
                     if chunk.usage is not None:
@@ -66,19 +86,42 @@ class ChatClient:
                         if choice.index != 0:
                             continue
                         text = choice.delta.content or ""
-                        reasoning = getattr(choice.delta, "reasoning_content", None) or ""
+                        reasoning = reasoning_text(choice.delta)
                         if text or reasoning:
                             if first_text is None:
                                 first_text = time.perf_counter() - start
                             parts.append(text)
                             reasoning_parts.append(reasoning)
+                            if reasoning and on_reasoning:
+                                on_reasoning(reasoning)
                             if on_text:
-                                on_text(reasoning + text)
+                                output = text if on_reasoning else reasoning + text
+                                if output:
+                                    on_text(output)
+                        for delta in choice.delta.tool_calls or []:
+                            call = tool_calls.setdefault(delta.index, {
+                                "id": "", "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            })
+                            if delta.id:
+                                call["id"] += delta.id
+                            if delta.type:
+                                call["type"] = delta.type
+                            if delta.function:
+                                call["function"]["name"] += delta.function.name or ""
+                                call["function"]["arguments"] += delta.function.arguments or ""
                         if choice.finish_reason is not None:
                             finish_reason = choice.finish_reason
             if finish_reason is None:
                 raise ValueError("流式响应意外中断，未收到 finish_reason")
             message = {"role": "assistant", "content": "".join(parts)}
+            if tool_calls:
+                message["tool_calls"] = [tool_calls[index] for index in sorted(tool_calls)]
+                if not message["content"]:
+                    message["content"] = None
+                for call in message["tool_calls"]:
+                    if not call["id"] or not call["function"]["name"]:
+                        raise ValueError("流式工具调用缺少 id 或函数名")
             if any(reasoning_parts):
                 message["reasoning_content"] = "".join(reasoning_parts)
         else:

@@ -70,7 +70,7 @@ with ChatClient.from_config("config.json") as client:
     print(stats["usage"])
 ```
 
-`complete(messages, stream=False, on_text=None)` 接受 OpenAI 格式的消息列表，返回 `(message, stats)`：
+`complete(messages, stream=False, on_text=None, tools=None, on_reasoning=None)` 接受 OpenAI 格式的消息列表，返回 `(message, stats)`：
 
 | 返回值 | 内容 |
 | --- | --- |
@@ -80,7 +80,7 @@ with ChatClient.from_config("config.json") as client:
 | `stats.usage` | 服务端 token 用量字典；未返回时为 `None` |
 | `stats.finish_reason` | 服务端完成原因，如 `stop` 或 `length` |
 
-`stats` 是字典，表中的字段通过 `stats["elapsed"]` 等方式访问。`stream=True` 时按顺序调用 `on_text(chunk)`，同时汇总完整回复；回调收到文本，也可能收到服务端单独返回的推理内容。客户端不直接打印，也不保存对话历史。调用方决定展示方式，以及是否将成功回复加入下一轮请求。
+`stats` 是字典，表中的字段通过 `stats["elapsed"]` 等方式访问。`stream=True` 时按顺序调用回调，同时汇总完整回复。指定 `on_reasoning(chunk)` 后，独立推理分片发送给该回调，`on_text(chunk)` 只接收正文；未指定时，`on_text` 保持接收推理和正文的原有行为。推理字段兼容 `reasoning_content`、`reasoning`、`thinking`，汇总后统一保存在消息的 `reasoning_content` 中。服务端未返回的推理内容无法展示。流式工具调用按索引拼接函数名和 JSON 参数，完整后放入 `message.tool_calls`。客户端不直接打印，也不保存对话历史。调用方决定展示方式，以及是否将成功回复加入下一轮请求。
 
 流式响应缺少 `finish_reason` 时抛出 `ValueError`。SDK 的 API 和网络异常原样向上传递，由 `cli.py` 的 `run()` 或交互程序处理。自动重试关闭，避免一次调用包含多次隐式请求。
 

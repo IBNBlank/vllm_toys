@@ -3,7 +3,7 @@
   "model": "qwen-robot",
   "api_key": "",
   "api_key_env": "",
-  "max_tokens": 4096,
+  "max_tokens": 16384,
   "timeout": 300,
   "stream_include_usage": true
 }

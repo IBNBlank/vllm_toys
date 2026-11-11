@@ -2,8 +2,7 @@
 
 from util import ChatClient
 from util.cli import (
-    argument_parser, image_content, print_message,
-    print_stats, read_prompt, run,
+    argument_parser, image_content, print_stats, read_prompt, run,
 )
 
 
@@ -13,8 +12,11 @@ def main():
     ).parse_args()
     content = image_content(read_prompt(args.text), args.image)
     with ChatClient.from_config(args.config) as client:
-        message, stats = client.complete([{"role": "user", "content": content}])
-    print_message(message)
+        _, stats = client.complete(
+            [{"role": "user", "content": content}], stream=True,
+            on_text=lambda chunk: print(chunk, end="", flush=True),
+        )
+    print(flush=True)
     print_stats(stats)
 
 
