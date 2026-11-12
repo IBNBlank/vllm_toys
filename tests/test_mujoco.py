@@ -23,6 +23,12 @@ POINT_ARGS = {
 }
 
 
+def rgb_png(size=(30, 40)):
+    buffer = io.BytesIO()
+    Image.new("RGB", size, (10, 20, 30)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def depth_png():
     image = Image.new("I", (3, 2))
     image.putdata([0, 1000, 2000, 65535, 1000, 2000])
@@ -102,29 +108,43 @@ class MujocoToolTests(unittest.TestCase):
         body = {"ok": True, "data": {"frame": "base", "position": [.2, .3, .4],
                                        "camera": "end", "pixel": [10, 20], "depth_m": .5,
                                        "epoch": 3, "step": 42, "object": "SECRET"}}
-        with patch("tool.mujoco.httpx.request", return_value=httpx.Response(200, json=body)) as request:
+        rgb = io.BytesIO()
+        Image.new("RGB", (30, 40), (0, 0, 0)).save(rgb, format="PNG")
+        with patch("tool.mujoco.httpx.request", side_effect=[
+            httpx.Response(200, json=body),
+            httpx.Response(200, content=rgb.getvalue(), headers={"content-type": "image/png"}),
+        ]) as request:
             result = self.robot.execute("robot_pixel_to_base", dict(POINT_ARGS))
-        self.assertEqual(request.call_args.args, ("POST", "http://127.0.0.1:8000/v1/camera/point"))
-        self.assertEqual(request.call_args.kwargs["json"], POINT_ARGS)
+        self.assertEqual(request.call_args_list[0].args, ("POST", "http://127.0.0.1:8000/v1/camera/point"))
+        self.assertEqual(request.call_args_list[0].kwargs["json"], POINT_ARGS)
+        self.assertEqual(request.call_args_list[1].args, ("GET", "http://127.0.0.1:8000/v1/camera/image"))
+        self.assertEqual(request.call_args_list[1].kwargs["params"], {"camera": "end", "type": "rgb"})
         self.assertEqual(result["data"]["position"], [.2, .3, .4])
+        self.assertEqual(result["marked_pixel"], [10, 20])
+        with Image.open(result["marked_image_path"]) as marked:
+            self.assertEqual(marked.getpixel((10, 20)), (0, 255, 255))
+            self.assertEqual(marked.getpixel((24, 20)), (255, 0, 255))
+            self.assertEqual(marked.getpixel((10, 6)), (255, 0, 255))
         self.assertNotIn("SECRET", json.dumps(result))
 
     def test_pixel_point_minimal_and_explicit_pose(self):
         schema = next(item["function"]["parameters"] for item in MUJOCO_TOOL_SCHEMAS
                       if item["function"]["name"] == "robot_pixel_to_base")
         self.assertEqual(set(schema["required"]), {"camera", "pixel", "depth_m"})
-        for camera in ("end", "left_rear"):
+        for camera in ("end", "opposite", "left"):
             minimal = {"camera": camera, "pixel": [10, 20], "depth_m": .5}
             explicit = {**minimal, "tcp_position_base": [1, 2, 3],
                         "tcp_quaternion_base": [1, 0, 0, 0]}
             for arguments in (minimal, explicit):
-                with self.subTest(arguments=arguments), patch("tool.mujoco.httpx.request", return_value=httpx.Response(
-                    200, json={"ok": True, "data": {"frame": "base", "position": [.1, .2, .3]}},
-                )) as request:
+                with self.subTest(arguments=arguments), patch("tool.mujoco.httpx.request", side_effect=[
+                    httpx.Response(200, json={"ok": True, "data": {"frame": "base", "position": [.1, .2, .3]}}),
+                    httpx.Response(200, content=rgb_png(), headers={"content-type": "image/png"}),
+                ]) as request:
                     result = self.robot.execute("robot_pixel_to_base", arguments)
                     self.assertTrue(result["ok"])
-                    self.assertEqual(request.call_args.kwargs["json"], arguments)
-                    self.assertEqual(request.call_args.args, ("POST", "http://127.0.0.1:8000/v1/camera/point"))
+                    self.assertEqual(result["data"]["position"], [.1, .2, .3])
+                    self.assertEqual(request.call_args_list[0].kwargs["json"], arguments)
+                    self.assertEqual(request.call_args_list[0].args, ("POST", "http://127.0.0.1:8000/v1/camera/point"))
 
     def test_pixel_point_incomplete_pose_and_calibration_rejected(self):
         minimal = {"camera": "end", "pixel": [10, 20], "depth_m": .5}
@@ -146,11 +166,72 @@ class MujocoToolTests(unittest.TestCase):
         for code, status in (("INVALID_ARGUMENT", 422),):
             with self.subTest(code=code), patch("tool.mujoco.httpx.request", return_value=httpx.Response(
                 status, json={"ok": False, "error": {"code": code, "message": "SECRET"}},
-            )):
+            )) as request:
                 result = self.robot.execute("robot_pixel_to_base", dict(POINT_ARGS))
             self.assertFalse(result["ok"])
             self.assertEqual(result["error"]["code"], code)
+            self.assertNotIn("marked_image_path", result)
             self.assertNotIn("SECRET", json.dumps(result))
+            request.assert_called_once()
+
+    def test_gripper_success_attaches_end_rgb_and_failure_does_not(self):
+        description = next(item["function"]["description"] for item in MUJOCO_TOOL_SCHEMAS
+                           if item["function"]["name"] == "robot_set_gripper")
+        self.assertIn("end", description)
+        success = httpx.Response(200, json={"ok": True, "data": {
+            "result": {"ok": True, "status": "reached"}, "state": {"gripper": {"opening_ratio": 1, "object": "SECRET"}},
+        }})
+        with patch("tool.mujoco.httpx.request", side_effect=[
+            success, httpx.Response(200, content=rgb_png(), headers={"content-type": "image/png"}),
+        ]) as request:
+            result = self.robot.execute("robot_set_gripper", {"action": "open"})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["camera"], "end")
+        self.assertEqual(result["type"], "rgb")
+        self.assertEqual(Path(result["image_path"]).read_bytes(), rgb_png())
+        self.assertEqual(request.call_args_list[1].kwargs["params"], {"camera": "end", "type": "rgb"})
+        self.assertNotIn("SECRET", json.dumps(result))
+        with patch("tool.mujoco.httpx.request", return_value=httpx.Response(
+            422, json={"ok": False, "error": {"code": "INVALID_ARGUMENT", "message": "SECRET"}},
+        )) as request:
+            failed = self.robot.execute("robot_set_gripper", {"action": "close"})
+        self.assertFalse(failed["ok"])
+        self.assertNotIn("image_path", failed)
+        request.assert_called_once()
+
+    def test_gripper_rgb_is_sent_to_model(self):
+        client = Mock()
+        client.complete.side_effect = [reply([call('{"action":"close"}', "robot_set_gripper", "grip")]), reply()]
+        with patch("tool.mujoco.httpx.request", side_effect=[
+            httpx.Response(200, json={"ok": True, "data": {"result": {"ok": True, "status": "reached"}}}),
+            httpx.Response(200, content=rgb_png(), headers={"content-type": "image/png"}),
+        ]):
+            _, history = complete_with_tools(client, [], robot=self.robot)
+        result = json.loads(history[1]["content"])
+        self.assertEqual(history[2]["role"], "user")
+        image_bytes = base64.b64decode(history[2]["content"][1]["image_url"]["url"].split(",", 1)[1])
+        self.assertEqual(image_bytes, Path(result["image_path"]).read_bytes())
+
+    def test_pixel_point_marked_rgb_is_sent_to_model(self):
+        client = Mock()
+        client.complete.side_effect = [reply([
+            call(json.dumps({"camera": "opposite", "pixel": [10, 20], "depth_m": .5}), "robot_pixel_to_base", "point"),
+        ]), reply()]
+        point = httpx.Response(200, json={"ok": True, "data": {
+            "frame": "base", "position": [.1, .2, .3], "camera": "opposite", "pixel": [10, 20], "depth_m": .5,
+        }})
+        with patch("tool.mujoco.httpx.request", side_effect=[
+            point, httpx.Response(200, content=rgb_png(), headers={"content-type": "image/png"}),
+        ]):
+            _, history = complete_with_tools(client, [], robot=self.robot)
+        result = json.loads(history[1]["content"])
+        self.assertEqual(result["data"]["position"], [.1, .2, .3])
+        self.assertEqual(history[2]["role"], "user")
+        image_bytes = base64.b64decode(history[2]["content"][1]["image_url"]["url"].split(",", 1)[1])
+        self.assertEqual(image_bytes, Path(result["marked_image_path"]).read_bytes())
+        description = next(item["function"]["description"] for item in MUJOCO_TOOL_SCHEMAS
+                           if item["function"]["name"] == "robot_pixel_to_base")
+        self.assertIn("洋红色圆圈", description)
 
     def test_actions_filter_ground_truth_on_success_and_failure(self):
         for success in (True, False):
@@ -216,9 +297,9 @@ class MujocoToolTests(unittest.TestCase):
             200, content=png, headers={"content-type": "image/png", "x-epoch": "2", "x-step": "123", "x-object": "SECRET", **frame_headers},
         )) as request:
             result = self.robot.execute("robot_camera_image", {
-                "camera": "left_rear", "type": "depth", "pixels": [[1, 0], [2, 1], [0, 0], [0, 1]],
+                "camera": "opposite", "type": "depth", "pixels": [[1, 0], [2, 1], [0, 0], [0, 1]],
             })
-        self.assertEqual(request.call_args.kwargs["params"], {"camera": "left_rear", "type": "depth"})
+        self.assertEqual(request.call_args.kwargs["params"], {"camera": "opposite", "type": "depth"})
         self.assertEqual(Path(result["image_path"]).read_bytes(), png)
         self.assertEqual(result["encoding"], "uint16_png")
         self.assertEqual((result["width"], result["height"]), (3, 2))

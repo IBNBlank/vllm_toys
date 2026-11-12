@@ -209,13 +209,13 @@ uv run --extra yolo chat_agent.py --enable-mujoco --enable-yolo
 | 工具 | 用途 |
 | --- | --- |
 | `robot_get_joints` / `robot_set_joints` | 查询或控制六个关节，角度单位弧度 |
-| `robot_get_pose` / `robot_set_pose` | 查询或控制末端绝对位姿，统一使用 `base_link` 坐标，位置单位米，四元数顺序 wxyz |
-| `robot_move_delta` | 在指令开始时的 TCP 当前坐标系中执行平移与 RPY 角度增量；平移米、角度弧度，支持连续自身坐标系操控 |
-| `robot_get_gripper` / `robot_set_gripper` | 查询或控制夹爪；action 与 opening_ratio 二选一 |
-| `robot_camera_image` | 获取 end 或 left_rear 相机的 RGB 或深度 PNG；默认 rgb，depth 返回原始毫米数据、灰度预览及像素深度 |
-| `robot_pixel_to_base` | 将指定相机的像素和深度转换为 `base_link` 下 XYZ，可选指定 TCP 位姿，省略时使用当前位姿 |
+| `robot_get_pose` / `robot_set_pose` | 查询或控制末端绝对位姿，统一使用 `base_link` 坐标，位置单位米，四元数顺序 wxyz。TCP 位置对标夹爪闭合时的指尖中点 |
+| `robot_move_delta` | 在指令开始时的 TCP 当前坐标系中执行平移与 RPY 角度增量；TCP +X 为闭合指尖前方，+Y 为开合方向。平移米、角度弧度 |
+| `robot_get_gripper` / `robot_set_gripper` | 查询或控制夹爪；action 与 opening_ratio 二选一。控制成功后额外返回手部相机 end 的当前 RGB |
+| `robot_camera_image` | 获取 end、opposite 或 left 相机的 RGB 或深度 PNG；默认 rgb，depth 返回原始毫米数据、灰度预览及像素深度 |
+| `robot_pixel_to_base` | 将指定相机的像素和深度转换为 `base_link` 下 XYZ，可选指定 TCP 位姿，省略时使用当前位姿；成功后附带标有所选像素的 RGB 供核对 |
 
-例如输入：`请先查看 left_rear 相机，再查询机械臂位姿，描述当前看到的场景。` 相机观察需要服务端模型支持视觉输入。`type="rgb"` 返回的图片路径可供同一进程中的 `detect_objects` 使用；深度图用于距离观测，不应交给 RGB 检测器。临时图片在 agent 退出时清理。
+例如输入：`请先查看 opposite 相机，再查询机械臂位姿，描述当前看到的场景。` 相机观察需要服务端模型支持视觉输入。`type="rgb"` 返回的图片路径可供同一进程中的 `detect_objects` 使用；深度图用于距离观测，不应交给 RGB 检测器。临时图片在 agent 退出时清理。
 
 深度调用示例（工具名均为 `robot_camera_image`）：
 
@@ -225,7 +225,7 @@ uv run --extra yolo chat_agent.py --enable-mujoco --enable-yolo
 
 `type` 可选 `rgb` 或 `depth`，省略时为 `rgb`。`pixels` 仅用于深度，指定最多 64 个整数像素 `[u,v]`，原点在左上角，u 向右、v 向下；省略时返回中心像素。工具保存未修改的单通道 uint16 PNG 到 `image_path`，单位毫米，并在 `samples` 中返回每个像素的 `depth_mm`、`depth_m` 和 `valid`。0 和 65535（饱和值）按无效处理，样本距离为 null；原始 PNG 保留原值。错误类型、非整数或越界像素会返回工具错误。
 
-`robot_pixel_to_base` 必填 `camera`、`pixel:[u,v]` 和 `depth_m`，例如 `{"camera":"end","pixel":[112,112],"depth_m":0.5}`。默认由服务端提供相机标定，`end` 使用当前 TCP 位姿计算；`left_rear` 是固定相机，其结果不随机械臂运动变化。可同时提供 `tcp_position_base` 和 `tcp_quaternion_base` 指定计算所用的 TCP 位姿，位置单位米，四元数顺序 wxyz。
+`robot_pixel_to_base` 必填 `camera`、`pixel:[u,v]` 和 `depth_m`，例如 `{"camera":"end","pixel":[112,112],"depth_m":0.5}`。默认由服务端提供相机标定，`end` 使用当前 TCP 位姿计算；`opposite` 和 `left` 是固定相机，其结果不随机械臂运动变化。`left` 位于机械臂左侧。可同时提供 `tcp_position_base` 和 `tcp_quaternion_base` 指定计算所用的 TCP 位姿，位置单位米，四元数顺序 wxyz。转换成功后，原有坐标结果保持不变，并额外返回同一相机的当前 RGB：`marked_image_path` 上用洋红色圆圈和加粗十字标出 `pixel`，中心为青色小块。这两种颜色不用于红、橙、黄物块、绿色目标或灰白机械臂。该图会发送给模型，用于自查选点是否落在目标上；它是成功后另拍的图像，不保证与深度采样帧同步。坐标转换失败时不附带标记图。
 
 `robot_camera_image` 返回值仍包含图像采集时的 `tcp_position_base`、`tcp_quaternion_base`、`camera_position_tcp`、`camera_rotation_tcp` 和 `intrinsics`。需要按特定深度帧精确反投影时，先请求 `type="depth"` 并用 `pixels:[[u,v]]` 获取样本，再将该样本的 `depth_m` 与同一次返回的完整采集元数据传给 `robot_pixel_to_base`；此模式不读取当前位姿或服务端最新图像。相机内外参必须全套传入，并同时提供采集时 TCP 位姿。默认当前位姿模式不保证与更早采集的深度帧同步。
 
@@ -233,7 +233,7 @@ uv run --extra yolo chat_agent.py --enable-mujoco --enable-yolo
 
 `reset`、全部 `object` 接口（包括位置查询、移动和 in-target 判定）、完整仿真配置查询均不开放。执行层使用固定路由白名单并拒绝额外参数，模型不能传入 URL、路径或任意 CLI 命令。机械臂和夹爪控制响应中附带的完整仿真快照也经过字段白名单过滤，只返回机器人状态和动作结果，剔除 object 真值及目标区信息；失败响应同样过滤。该限制作用于本项目的 agent 工具层，原仿真服务的管理接口仍由子模块提供。
 
-所有机械臂和物块 pose 均以 `base_link` 为基准；默认场景的 base 在 world Z=0.25 m，旧 world 目标迁移到 base 时 Z 减 0.25 m。`robot_move_delta` 使用指令开始时的 TCP 坐标系：`delta_position=[dx,dy,dz]` 沿 TCP 局部轴，`delta_rpy=[roll,pitch,yaw]` 为右手系局部旋转（弧度）。
+所有机械臂和物块 pose 均以 `base_link` 为基准；默认场景的 base 在 world Z=0.25 m，旧 world 目标迁移到 base 时 Z 减 0.25 m。TCP 原点对标夹爪闭合时两指尖之间的位置，`+X` 指向指尖前方；张开时指尖离开该点，位姿原点不随开合移动。`robot_move_delta` 使用指令开始时的 TCP 坐标系：`delta_position=[dx,dy,dz]` 沿 TCP 局部轴，`delta_rpy=[roll,pitch,yaw]` 为右手系局部旋转（弧度）。
 
 其他 agent 可以复用相同适配器：
 
@@ -269,7 +269,7 @@ MUJOCO_AGENT_E2E=1 uv run --locked python -m unittest discover \
 
 agent 可自行选择 `robot_set_pose` 绝对位姿控制或 `robot_move_delta` TCP 局部增量控制，测试不开放关节控制工具。提示词提供确认红块、靠近并微调、闭爪抬起、移到目标附近并微调、松爪撤离的五步流程。绝对位姿使用 `base_link` 坐标；增量方向相对指令开始时 TCP 坐标系。像素点需从 depth 帧取得深度样本，调用 `robot_pixel_to_base` 时必须指定对应相机；可省略 TCP 位姿使用当前姿态，或显式提供位姿。需要按同一帧精确反投影时，传入该帧完整的 TCP pose、相机外参和内参。
 
-agent 仍可查询关节、末端位姿、夹爪状态和两路相机的 RGB/深度，并控制夹爪；不启用 YOLO 或任意文件/命令访问。每个初始、基准和最终观测阶段均采集两路相机的 RGB 与深度。模型通过“观察 → 小幅位置偏移 → 再观察”逐步靠近、对齐、抓取和放置，无需先求出物块或目标的精确世界坐标；准备位姿仅是机器人控制基准。方向不明时基于当前实测位姿做 1～2 cm 单轴试探，接近接触区域时缩小至毫米级，每次观察后再调整。提示词保留坐标约定和偏移换算，并要求在抬升、运输、释放撤离后主动拍照。
+agent 仍可查询关节、末端位姿、夹爪状态和 end、opposite、left 三路相机的 RGB/深度，并控制夹爪；不启用 YOLO 或任意文件/命令访问。每个初始、基准和最终观测阶段均采集三路相机的 RGB 与深度。任务提示明确要求使用左侧固定相机 left 区分并排物块，并在关键步骤与 opposite 一起拍照。模型通过“观察 → 小幅位置偏移 → 再观察”逐步靠近、对齐、抓取和放置，无需先求出物块或目标的精确世界坐标；准备位姿仅是机器人控制基准。方向不明时基于当前实测位姿做 1～2 cm 单轴试探，接近接触区域时缩小至毫米级，每次观察后再调整。提示词保留坐标约定，并明确禁止手动进行大量位姿变换、四元数或像素反投影运算；像素坐标必须交给 robot_pixel_to_base。提示词要求在抬升、运输、释放撤离后主动拍照。
 
 完成后，测试再获取两组间隔至少一秒的传感器观测，并以独立模型请求进行视觉验收。验收只接收过滤后的工具记录、传感器反馈和相机图像，不接收执行 agent 的成功声明；初始物块在目标外、实际夹起、夹持运输、释放到目标内、稳定且夹爪撤离这五项必须全部通过。关键证据不足时判失败。该验收依赖视觉模型判断，存在识别误差，不等同于仿真真值测量；测试与验收均不访问 object 或 in-target 接口。
 

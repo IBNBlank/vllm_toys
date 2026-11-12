@@ -36,20 +36,20 @@ TOOL_SCHEMAS = [
     _schema("robot_set_joints", "控制机械臂六个关节；检查返回的 reached/blocked 状态。", {
         "positions": _vector(6, "六个目标关节角，单位弧度"), "timeout_s": _TIMEOUT,
     }, ["positions"]),
-    _schema("robot_get_pose", "查询末端位姿，位置和姿态均以机械臂 base_link 为基准，位置单位米，四元数顺序 wxyz。", {"frame": _FRAME}),
-    _schema("robot_set_pose", "控制末端绝对位姿，位置以 base_link 为基准，位置单位米，四元数顺序 wxyz。frame 固定为 base。省略四元数时保持当前朝向。IK_FAILED 表示目标无解，应观察当前状态并调整目标，不要原样重试。检查 reached/blocked 状态。", {
-        "position": _vector(3, "目标 xyz，单位米，base_link 坐标系"),
+    _schema("robot_get_pose", "查询末端位姿。TCP 位置对标夹爪闭合时的指尖：原点在两指尖之间，+X 指向指尖前方，+Y 为开合方向。张开时指尖离开该点，位姿原点不随开合移动。位置和姿态均以机械臂 base_link 为基准，位置单位米，四元数顺序 wxyz。", {"frame": _FRAME}),
+    _schema("robot_set_pose", "控制末端绝对位姿。position 是夹爪闭合时指尖中点的目标位置，不是张开指尖或腕部位置。位置以 base_link 为基准，位置单位米，四元数顺序 wxyz。frame 固定为 base。省略四元数时保持当前朝向。IK_FAILED 表示目标无解，应观察当前状态并调整目标，不要原样重试。检查 reached/blocked 状态。", {
+        "position": _vector(3, "闭合指尖中点的目标 xyz，单位米，base_link 坐标系"),
         "quaternion": _vector(4, "单位四元数 wxyz，模长必须接近 1；保持朝向时省略"), "frame": _FRAME, "timeout_s": _TIMEOUT,
     }, ["position"]),
-    _schema("robot_move_delta", "在指令开始时的 TCP 当前坐标系中移动。delta_position 沿 TCP +X前、+Y左、+Z上；delta_rpy 是局部 roll/pitch/yaw（弧度，右手规则），位置按当前朝向变换，旋转局部右乘。适合连续自身坐标系操控；每次移动后检查 reached/blocked。", {
+    _schema("robot_move_delta", "在指令开始时的 TCP 当前坐标系中移动。TCP 原点对标夹爪闭合时的指尖中点。delta_position 沿 TCP +X指尖前方、+Y开合方向、+Z上；delta_rpy 是局部 roll/pitch/yaw（弧度，右手规则），位置按当前朝向变换，旋转局部右乘。适合连续自身坐标系操控；每次移动后检查 reached/blocked。", {
         "delta_position": {**_vector(3, "TCP 局部平移增量，米；默认 [0,0,0]"), "default": [0, 0, 0]},
         "delta_rpy": {**_vector(3, "TCP 局部 roll,pitch,yaw 增量，弧度；默认 [0,0,0]"), "default": [0, 0, 0]}, "timeout_s": _TIMEOUT,
     }),
-    _schema("robot_pixel_to_base", "将指定相机的深度像素转换为 base_link 下 XYZ。必须提供 camera、pixel 和 depth_m。默认使用服务端相机标定；省略 TCP 位姿时 end 使用当前 TCP 姿态，left_rear 使用固定相机姿态。可提供 tcp_position_base 与 tcp_quaternion_base 指定 TCP 姿态；若使用特定深度帧的标定，则传入该帧 robot_camera_image(type=depth) 返回的完整采集元数据。", {
-        "camera": {"type": "string", "enum": ["end", "left_rear"], "description": "深度来自的相机，必填"},
+    _schema("robot_pixel_to_base", "将指定相机的深度像素转换为 base_link 下 XYZ。必须提供 camera、pixel 和 depth_m。默认使用服务端相机标定；省略 TCP 位姿时 end 使用当前 TCP 姿态，opposite 和 left 使用固定相机姿态。可提供 tcp_position_base 与 tcp_quaternion_base 指定 TCP 姿态；若使用特定深度帧的标定，则传入该帧 robot_camera_image(type=depth) 返回的完整采集元数据。成功时除坐标外，还会返回同一相机的 RGB，并用洋红色圆圈和十字标出所选 pixel，中心为青色。这两种颜色不用于场景中的红、橙、黄物块、绿色目标或灰白机械臂。该图会发给模型，用于核对选点是否落在目标上。", {
+        "camera": {"type": "string", "enum": ["end", "opposite", "left"], "description": "深度来自的相机，必填。left 是机械臂左侧固定相机"},
         "pixel": {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 2, "maxItems": 2, "description": "深度图像素 [u,v]，原点左上"},
         "depth_m": {"type": "number", "exclusiveMinimum": 0, "maximum": 65.534, "description": "所选像素相机光轴深度，米"},
-        "tcp_position_base": _vector(3, "可选：用于计算的 TCP 在 base_link 下位置，米；与四元数成对传入"),
+        "tcp_position_base": _vector(3, "可选：用于计算的闭合指尖中点在 base_link 下位置，米；与四元数成对传入"),
         "tcp_quaternion_base": _vector(4, "可选：用于计算的 TCP 在 base_link 下 wxyz 四元数；与位置成对传入"),
         "camera_position_tcp": _vector(3, "可选：同一深度帧的相机光心在 TCP 下的位置，米；精确帧标定时与其他标定字段一起传入"),
         "camera_rotation_tcp": {"type": "array", "items": _vector(3, "旋转矩阵行"), "minItems": 3, "maxItems": 3},
@@ -61,13 +61,13 @@ TOOL_SCHEMAS = [
         "epoch": {"type": "integer", "minimum": 0}, "step": {"type": "integer", "minimum": 0},
     }, ["camera", "pixel", "depth_m"]),
     _schema("robot_get_gripper", "查询夹爪开合状态。"),
-    _schema("robot_set_gripper", "控制夹爪，action 与 opening_ratio 必须且只能提供一个。", {
+    _schema("robot_set_gripper", "控制夹爪，action 与 opening_ratio 必须且只能提供一个。动作成功后额外返回手部相机 end 的当前 RGB，供核对夹爪开合和指尖是否接触物体。", {
         "action": {"type": "string", "enum": ["open", "close"]},
         "opening_ratio": {"type": "number", "minimum": 0, "maximum": 1},
         "timeout_s": _TIMEOUT,
     }),
     _schema("robot_camera_image", "获取 RGB 或毫米深度图，默认 rgb。深度返回原始 uint16 PNG、灰度预览和像素距离；预览会发送给模型。detect_objects 仅用于 RGB。", {
-        "camera": {"type": "string", "enum": ["end", "left_rear"]},
+        "camera": {"type": "string", "enum": ["end", "opposite", "left"], "description": "end 为手部相机，opposite 为桌对面固定相机，left 为左侧固定相机"},
         "type": {"type": "string", "enum": ["rgb", "depth"], "description": "默认 rgb；depth 为相机光轴方向深度，不是 world Z"},
         "pixels": {"type": "array", "minItems": 1, "maxItems": 64,
                    "items": {"type": "array", "minItems": 2, "maxItems": 2,
@@ -233,16 +233,16 @@ class MujocoRobotTool:
         if name == "robot_pixel_to_base" and response.is_success:
             body = response.json()
             data = body.get("data") or {}
-            return {"ok": bool(body.get("ok")) and response.is_success,
-                    "data": _select(data, ("frame", "position", "camera", "pixel", "depth_m", "epoch", "step"))}
+            output = {"ok": bool(body.get("ok")) and response.is_success,
+                      "data": _select(data, ("frame", "position", "camera", "pixel", "depth_m", "epoch", "step"))}
+            if output["ok"]:
+                output.update(self._marked_rgb(arguments["camera"], arguments["pixel"]))
+            return output
         if name == "robot_camera_image" and response.is_success:
             if not response.headers.get("content-type", "").startswith("image/png") or not response.content.startswith(b"\x89PNG\r\n\x1a\n"):
                 raise ValueError("相机未返回 PNG 图片")
-            if self._images is None:
-                self._images = tempfile.TemporaryDirectory(prefix="vllm-robot-")
-            with tempfile.NamedTemporaryFile(dir=self._images.name, suffix=".png", delete=False) as image:
-                image.write(response.content)
-            output = {"image_path": str(Path(image.name).resolve()), "camera": payload.get("camera", "end"),
+            path = self._save_png(response.content)
+            output = {"image_path": str(path.resolve()), "camera": payload.get("camera", "end"),
                       "type": payload["type"]}
             # Expose only frame metadata, never arbitrary response headers.
             for key in ("epoch", "step", "captured_at_ns", "width", "height"):
@@ -258,7 +258,7 @@ class MujocoRobotTool:
                 if value is not None:
                     output[field] = json.loads(base64.urlsafe_b64decode(value.encode()).decode())
             if payload["type"] == "depth":
-                output.update(self._depth_observation(response.content, arguments.get("pixels"), Path(image.name)))
+                output.update(self._depth_observation(response.content, arguments.get("pixels"), path))
             return output
         # Never include raw HTTP bodies or server error details (which may contain snapshots).
         body = response.json()
@@ -280,7 +280,71 @@ class MujocoRobotTool:
         else:
             kind = "joints" if name.endswith("joints") else "pose" if name.endswith("pose") or name == "robot_move_delta" else "gripper"
             output["data"] = _select(data, _FIELDS[kind] + _META)
+        if name == "robot_set_gripper" and output["ok"]:
+            output.update(self._camera_rgb("end"))
         return output
+
+    def _save_png(self, content):
+        if self._images is None:
+            self._images = tempfile.TemporaryDirectory(prefix="vllm-robot-")
+        with tempfile.NamedTemporaryFile(dir=self._images.name, suffix=".png", delete=False) as image:
+            image.write(content)
+        return Path(image.name)
+
+    def _fetch_rgb(self, camera):
+        response = httpx.request(
+            "GET", self.server + "/v1/camera/image", params={"camera": camera, "type": "rgb"},
+            timeout=self.timeout_s, follow_redirects=False,
+        )
+        if not response.is_success or not response.headers.get("content-type", "").startswith("image/png") or not response.content.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("动作已成功，但未能获取用于核对的 RGB")
+        return response.content
+
+    def _camera_rgb(self, camera):
+        """Attach a current RGB frame from one camera."""
+        path = self._save_png(self._fetch_rgb(camera))
+        return {"image_path": str(path.resolve()), "camera": camera, "type": "rgb"}
+
+    def _marked_rgb(self, camera, pixel):
+        """Attach a current RGB of the same camera with the selected pixel marked."""
+        with Image.open(io.BytesIO(self._fetch_rgb(camera))) as image:
+            if image.format != "PNG" or image.mode not in {"RGB", "RGBA"}:
+                raise ValueError("选点核对图必须是 RGB PNG")
+            rgb = image.convert("RGB")
+        u, v = pixel
+        width, height = rgb.size
+        if u >= width or v >= height:
+            raise ValueError(f"像素 [{u},{v}] 超出核对图 {width}×{height} 范围")
+        # Magenta and cyan are absent from the blocks, target and arm, so the mark stays readable.
+        mark = rgb.load()
+        radius = max(14, min(width, height) // 7)
+        thickness = max(3, min(width, height) // 48)
+
+        def paint(x, y, color):
+            if 0 <= x < width and 0 <= y < height:
+                mark[x, y] = color
+
+        for offset in range(-radius, radius + 1):
+            for du, dv in ((offset, 0), (0, offset)):
+                for width_offset in range(-thickness // 2, thickness // 2 + 1):
+                    paint(u + du + (width_offset if dv else 0), v + dv + (width_offset if du else 0), (255, 0, 255))
+        for y in range(max(0, v - radius), min(height, v + radius + 1)):
+            for x in range(max(0, u - radius), min(width, u + radius + 1)):
+                distance = math.hypot(x - u, y - v)
+                if radius - thickness <= distance <= radius:
+                    paint(x, y, (255, 0, 255))
+        for offset in range(-thickness, thickness + 1):
+            for du, dv in ((offset, 0), (0, offset)):
+                paint(u + du, v + dv, (0, 255, 255))
+        path = self._save_png(b"")
+        rgb.save(path)
+        return {
+            "marked_image_path": str(path.resolve()), "marked_camera": camera, "marked_pixel": [u, v],
+            "marked_image": {
+                "width": width, "height": height,
+                "legend": "洋红色圆圈和十字标出选点，青色小块是所选 pixel。这些颜色不属于场景物体。请核对标记是否落在目标物体上；偏离则重新选点。",
+            },
+        }
 
     def _depth_observation(self, content, pixels, path):
         with Image.open(io.BytesIO(content)) as image:

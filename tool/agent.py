@@ -63,16 +63,19 @@ def complete_with_tools(client, messages, detector=None, max_rounds=5, on_stats=
             })
         # Append camera observations after all tool replies to preserve tool-call protocol.
         for call in calls:
-            if call["function"]["name"] == "robot_camera_image":
+            if call["function"]["name"] in {"robot_camera_image", "robot_pixel_to_base", "robot_set_gripper"}:
                 tool_reply = next(entry for entry in reversed(pending)
                                   if entry.get("role") == "tool" and entry.get("tool_call_id") == call["id"])
                 observation = json.loads(tool_reply["content"])
-                if "image_path" in observation:
+                image_path = observation.get("marked_image_path", observation.get("preview_path", observation.get("image_path")))
+                if image_path:
                     from util.cli import image_content
 
                     pending.append({"role": "user", "content": image_content(
-                        "机器人相机观测（depth 为灰度预览，精确毫米值和本帧缩放范围见工具返回；不能当作 RGB）：\n"
+                        "机器人相机观测（depth 为灰度预览，精确毫米值和本帧缩放范围见工具返回；不能当作 RGB。"
+                        "pixel_to_base 附带的是标有所选像素的 RGB，洋红色圆圈和十字的青色中心即 pixel，用于核对选点。"
+                        "夹爪动作附带的是手部相机 end 的当前 RGB，用于核对开合）：\n"
                         + json.dumps(observation, ensure_ascii=False),
-                        Path(observation.get("preview_path", observation["image_path"])),
+                        Path(image_path),
                     )})
     raise ValueError(f"工具调用达到 {max_rounds} 轮上限，本轮对话未保存")
