@@ -144,6 +144,35 @@ class ClientTests(unittest.TestCase):
             input=input, text=True, capture_output=True, cwd=self.directory, timeout=10,
         )
 
+    def test_thinking_controls_reach_server(self):
+        for controls in (
+            {"reasoning_effort": "low"},
+            {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}},
+        ):
+            for stream in (False, True):
+                with self.subTest(controls=controls, stream=stream):
+                    with ChatClient({**self.config, **controls}) as client:
+                        client.complete([{"role": "user", "content": "抓取红块"}], stream=stream)
+                    payload = self.server.requests[-1][1]
+                    expected = controls.get("extra_body", controls)
+                    for key, value in expected.items():
+                        self.assertEqual(payload[key], value)
+                    self.assertNotIn("extra_body", payload)
+
+    def test_thinking_controls_omitted_by_default(self):
+        self.client.complete([{"role": "user", "content": "你好"}])
+        payload = self.server.requests[-1][1]
+        self.assertNotIn("reasoning_effort", payload)
+        self.assertNotIn("chat_template_kwargs", payload)
+
+    def test_invalid_thinking_config(self):
+        for controls in (
+            {"reasoning_effort": ""}, {"reasoning_effort": False},
+            {"extra_body": []}, {"extra_body": None},
+        ):
+            with self.subTest(controls=controls), self.assertRaises(ValueError):
+                ChatClient({**self.config, **controls})
+
     def test_text_default_path_and_usage(self):
         result = self.invoke("chat_request.py")
         self.assertEqual(result.returncode, 0, result.stderr)

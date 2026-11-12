@@ -32,6 +32,8 @@ class ChatClient:
         self.model = config["model"]
         self.max_tokens = config.get("max_tokens", 128)
         self.stream_include_usage = config.get("stream_include_usage", True)
+        self.reasoning_effort = config.get("reasoning_effort")
+        self.extra_body = config.get("extra_body")
         api_key = config.get("api_key")
         if config.get("api_key_env"):
             api_key = os.environ.get(config["api_key_env"])
@@ -67,6 +69,10 @@ class ChatClient:
             "max_tokens": self.max_tokens,
             "stream": stream,
         }
+        if self.reasoning_effort is not None:
+            params["reasoning_effort"] = self.reasoning_effort
+        if self.extra_body is not None:
+            params["extra_body"] = self.extra_body
         if tools:
             params["tools"] = tools
             params["tool_choice"] = "auto"

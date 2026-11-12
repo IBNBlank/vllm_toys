@@ -23,6 +23,12 @@ def validate_config(config):
             raise ValueError(f"{key} 必须是字符串，不使用时留空")
     if type(config.get("stream_include_usage", True)) is not bool:
         raise ValueError("stream_include_usage 必须是布尔值")
+    if "reasoning_effort" in config:
+        effort = config["reasoning_effort"]
+        if not isinstance(effort, str) or not effort.strip():
+            raise ValueError("reasoning_effort 必须是非空字符串，例如 low；可用值取决于服务端")
+    if "extra_body" in config and not isinstance(config["extra_body"], dict):
+        raise ValueError("extra_body 必须是 JSON 对象")
     return dict(config)
 
 
